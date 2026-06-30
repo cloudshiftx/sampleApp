@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: sampleapp
-        image: dockeritc778/sampleapp:IMAGE_TAG
+        image: dockeritc02/sampleapp:IMAGE_TAG
         ports:
         - containerPort: 5000
 
