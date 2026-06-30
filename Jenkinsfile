@@ -1,8 +1,9 @@
+@Library('my-shared-library') _ 
+
 def buildTag = ''
 
 pipeline {
     agent { label 'build-agent-01' }
-
 
     stages {
         stage('Generate Tag') {
@@ -19,27 +20,27 @@ pipeline {
         stage('Use Tag') {
             steps {
                 script {
-                    echo "The build tag is: ${buildTag}"
+                    echo "The current build tag version is: ${buildTag}"
                 }
             }
         }
 
         stage('Checkout Code') {
             steps {
+                // Now targeting your personal repository space
                 git url: 'https://github.com/cloudshiftx/sampleApp.git', branch: 'master'
             }
         }
 
+        // SonarQube stages are preserved here as comments for future setup
+        /*
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('MySonarServer') {
                     sh '''
                         export PATH=$PATH:/home/danish/.dotnet/tools
-
                         dotnet sonarscanner begin /k:"sampleapp"
-
                         dotnet build -c Release
-
                         dotnet sonarscanner end
                     '''
                 }
@@ -53,6 +54,7 @@ pipeline {
                 }
             }
         }
+        */
 
         stage('Build Docker Image') {
             steps {
@@ -62,16 +64,15 @@ pipeline {
             }
         }
 
-        //  Trivy with HTML report
         stage('Trivy Scan') {
             steps {
-                echo 'Preparing Trivy template...'
+                echo 'Preparing local Trivy template...'
                 sh '''
                     mkdir -p contrib
                     curl -s -o contrib/html.tpl https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl
                 '''
 
-                echo 'Running Trivy scan...'
+                echo 'Running vulnerability scan...'
                 sh """
                     trivy image --scanners vuln \
                     --format template \
@@ -80,11 +81,9 @@ pipeline {
                     sampleapp:${buildTag}
                 """
             }
-
             post {
                 always {
                     archiveArtifacts artifacts: 'trivy-report.html', fingerprint: true
-
                     publishHTML([
                         reportDir: '.',
                         reportFiles: 'trivy-report.html',
@@ -94,16 +93,42 @@ pipeline {
             }
         }
 
-        stage('Push to Docker Registry') {
+        stage('Push to Personal Docker Registry') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'docker-login-itc', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
                         sh """
                             echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                            docker tag sampleapp:${buildTag} ${DOCKER_USER}/sampleapp:${buildTag}
-                            docker push ${DOCKER_USER}/sampleapp:${buildTag}
+                            docker tag sampleapp:${buildTag} \${DOCKER_USER}/sampleapp:${buildTag}
+                            docker push \${DOCKER_USER}/sampleapp:${buildTag}
                         """
                     }
+                }
+            }
+        }
+
+        stage('Deploy to DEV') {
+            steps {
+                script {
+                    echo '=== Routing to Isolation Environment: DEV ==='
+                    sh 'kubectl config set-context --current --namespace=dev'
+                    deployK8s(buildTag) 
+                }
+            }
+        }
+
+        stage('Promote to PROD Gate') {
+            steps {
+                input message: 'Deployment to DEV successful. Verify the environment status and approve release to PROD.', ok: 'Approve Release'
+            }
+        }
+
+        stage('Deploy to PROD') {
+            steps {
+                script {
+                    echo '=== Routing to Isolation Environment: PROD ==='
+                    sh 'kubectl config set-context --current --namespace=prod'
+                    deployK8s(buildTag)
                 }
             }
         }
