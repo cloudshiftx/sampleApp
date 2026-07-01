@@ -27,7 +27,7 @@ pipeline {
 
         stage('Checkout Code') {
             steps {
-                // Now targeting your personal repository space
+                // Targeting your personal repository space
                 git url: 'https://github.com/cloudshiftx/sampleApp.git', branch: 'master'
             }
         }
@@ -84,7 +84,12 @@ pipeline {
             post {
                 always {
                     archiveArtifacts artifacts: 'trivy-report.html', fingerprint: true
-                    publishHTML([
+                    
+                    // Fixed configuration block with required compilation parameters
+                    publishHTML(target: [
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
                         reportDir: '.',
                         reportFiles: 'trivy-report.html',
                         reportName: 'Trivy Security Report'
