@@ -1,0 +1,65 @@
+@Library('my-shared-library') _ 
+
+def buildTag = ''
+
+pipeline {
+    agent { label 'build-agent-01' }
+
+    stages {
+        stage('Generate Tag') {
+            steps {
+                script {
+                    def date = new Date().format('yyyyMMdd')
+                    buildTag = "${date}.${env.BUILD_NUMBER}-validation"
+                    currentBuild.displayName = buildTag
+                }
+            }
+        }
+
+        stage('Checkout Feature Code') {
+            steps {
+                git url: 'https://github.com/cloudshiftx/sampleApp.git', branch: env.BRANCH_NAME
+            }
+        }
+
+        stage('Validate Docker Build') {
+            steps {
+                script {
+                    sh "docker build -t sampleapp:${buildTag} ."
+                }
+            }
+        }
+
+        stage('Trivy Security Scan') {
+            steps {
+                echo 'Preparing local Trivy template...'
+                sh '''
+                    mkdir -p contrib
+                    curl -s -o contrib/html.tpl https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl
+                '''
+
+                echo 'Running vulnerability scan...'
+                sh """
+                    trivy image --scanners vuln \
+                    --format template \
+                    --template "@contrib/html.tpl" \
+                    -o validation-report.html \
+                    sampleapp:${buildTag}
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'validation-report.html', fingerprint: true
+                    publishHTML(target: [
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'validation-report.html',
+                        reportName: 'Validation Security Report'
+                    ])
+                }
+            }
+        }
+    }
+}
